@@ -38,6 +38,7 @@ let measurementsCatalog = [];
 let financeCategories = [];
 let categoriesMap = {};
 
+
 // +++ NEW: Загрузка справочников биометрики
 async function loadBiometricCatalogs() {
   try {
@@ -63,130 +64,77 @@ async function loadFinanceCategories() {
 
 // +++ NEW: Функция учёта связей (биометрика, финансы) в характеристиках
 function calculateTotalStatsWithLinks(parsed, friction, biometricData, financeData) {
-    const mult = 1 + (friction - 1) / 9;
-    // Сначала базовые бонусы (привычки и их комбинации)
-    const totals = calculateTotalStats(parsed, friction);
+  // Сначала обычные характеристики + сочетания привычек (это уже есть в calculateTotalStats)
+  const totals = calculateTotalStats(parsed, friction);
 
-    // Построение map id привычки -> выполнена ли она
-    const habitNameToId = {};
-    habitsCatalog.forEach(h => {
-        const key = `${h.name}|${h.category}`;
-        habitNameToId[key] = h.id;
-    });
-    const habitIds = {};
-    parsed.forEach(item => {
-        if (item.type === "habit") {
-            const key = `${item.name}|${item.category}`;
-            const id = habitNameToId[key];
-            if (id) habitIds[id] = item.success;
-        }
-    });
-
-    // 1. Связи привычка ↔ биометрика
-    for (const link of habitBiometricLinks) {
-        const habitDone = habitIds[link.habit_id] || false;
-        if (!habitDone) continue;
-
-        let found = false;
-        if (link.biometric_type === 'substance' && link.biometric_id) {
-            found = biometricData.intakes?.some(i => i.substance_id === link.biometric_id && i.taken);
-        } else if (link.biometric_type === 'meal' && link.biometric_id) {
-            found = biometricData.meals?.some(m => m.id === link.biometric_id);
-        } else if (link.biometric_type === 'activity' && link.biometric_id) {
-            found = biometricData.activities?.some(a => a.id === link.biometric_id);
-        } else if (link.biometric_type === 'measurement' && link.biometric_id) {
-            found = biometricData.measurements?.some(m => m.id === link.biometric_id);
-        } else if (!link.biometric_id) {
-            if (link.biometric_type === 'substance') found = biometricData.intakes?.some(i => i.taken);
-            else if (link.biometric_type === 'meal') found = biometricData.meals?.length > 0;
-            else if (link.biometric_type === 'activity') found = biometricData.activities?.length > 0;
-            else if (link.biometric_type === 'measurement') found = biometricData.measurements?.length > 0;
-        }
-
-        if (found) {
-            totals.I += (link.bonus_i || 0) * mult;
-            totals.S += (link.bonus_s || 0) * mult;
-            totals.W += (link.bonus_w || 0) * mult;
-            totals.E += (link.bonus_e || 0) * mult;
-            totals.C += (link.bonus_c || 0) * mult;
-            totals.H += (link.bonus_h || 0) * mult;
-            totals.ST += (link.bonus_st || 0) * mult;
-            totals.$ += (link.bonus_money || 0) * mult;
-        }
+  // Бонусы от биометрических связей
+  for (const link of habitBiometricLinks) {
+    let found = false;
+    if (link.biometric_type === 'substance' && link.biometric_id) {
+      found = biometricData.intakes?.some(i => i.substance_id === link.biometric_id && i.taken);
+    } else if (link.biometric_type === 'meal' && link.biometric_id) {
+      found = biometricData.meals?.some(m => m.id === link.biometric_id);
+    } else if (link.biometric_type === 'activity' && link.biometric_id) {
+      found = biometricData.activities?.some(a => a.id === link.biometric_id);
+    } else if (link.biometric_type === 'measurement' && link.biometric_id) {
+      found = biometricData.measurements?.some(m => m.id === link.biometric_id);
+    } else if (!link.biometric_id) {
+      // Если ID не указан, считаем, что любая запись данного типа подходит
+      if (link.biometric_type === 'substance') found = biometricData.intakes?.some(i => i.taken);
+      else if (link.biometric_type === 'meal') found = biometricData.meals?.length > 0;
+      else if (link.biometric_type === 'activity') found = biometricData.activities?.length > 0;
+      else if (link.biometric_type === 'measurement') found = biometricData.measurements?.length > 0;
     }
-
-    // 2. Связи привычка ↔ финансы
-    for (const link of habitFinanceLinks) {
-        const habitDone = habitIds[link.habit_id] || false;
-        if (!habitDone) continue;
-
-        let found = false;
-        if (link.finance_type === 'income_active') {
-            const incomes = financeData.filter(t => {
-                const cat = categoriesMap[t.category_id];
-                return cat && cat.type === 'income' && cat.is_active;
-            });
-            const totalIncome = incomes.reduce((sum, t) => sum + t.amount, 0);
-            if (totalIncome >= link.threshold) found = true;
-        } else if (link.finance_type === 'income_passive') {
-            const incomes = financeData.filter(t => {
-                const cat = categoriesMap[t.category_id];
-                return cat && cat.type === 'income' && !cat.is_active;
-            });
-            const totalIncome = incomes.reduce((sum, t) => sum + t.amount, 0);
-            if (totalIncome >= link.threshold) found = true;
-        } else if (link.finance_type === 'expense') {
-            const expenses = financeData.filter(t => {
-                const cat = categoriesMap[t.category_id];
-                return cat && cat.type === 'expense';
-            });
-            const totalExpense = expenses.reduce((sum, t) => sum + t.amount, 0);
-            if (totalExpense >= link.threshold) found = true;
-        }
-
-        if (found) {
-            totals.I += (link.bonus_i || 0) * mult;
-            totals.S += (link.bonus_s || 0) * mult;
-            totals.W += (link.bonus_w || 0) * mult;
-            totals.E += (link.bonus_e || 0) * mult;
-            totals.C += (link.bonus_c || 0) * mult;
-            totals.H += (link.bonus_h || 0) * mult;
-            totals.ST += (link.bonus_st || 0) * mult;
-            totals.$ += (link.bonus_money || 0) * mult;
-        }
+    if (found) {
+      totals.I += (link.bonus_i || 0);
+      totals.S += (link.bonus_s || 0);
+      totals.W += (link.bonus_w || 0);
+      totals.E += (link.bonus_e || 0);
+      totals.C += (link.bonus_c || 0);
+      totals.H += (link.bonus_h || 0);
+      totals.ST += (link.bonus_st || 0);
+      totals.$ += (link.bonus_money || 0);
     }
+  }
 
-    // 3. Автоматические бонусы от биометрики (без привязки к привычке)
-    for (const bonus of autoBiometricBonuses) {
-        let found = false;
-        if (bonus.biometric_type === 'substance' && bonus.biometric_id) {
-            found = biometricData.intakes?.some(i => i.substance_id === bonus.biometric_id && i.taken);
-        } else if (bonus.biometric_type === 'meal' && bonus.biometric_id) {
-            found = biometricData.meals?.some(m => m.id === bonus.biometric_id);
-        } else if (bonus.biometric_type === 'activity' && bonus.biometric_id) {
-            found = biometricData.activities?.some(a => a.id === bonus.biometric_id);
-        } else if (bonus.biometric_type === 'measurement' && bonus.biometric_id) {
-            found = biometricData.measurements?.some(m => m.id === bonus.biometric_id);
-        } else if (!bonus.biometric_id) {
-            if (bonus.biometric_type === 'substance') found = biometricData.intakes?.some(i => i.taken);
-            else if (bonus.biometric_type === 'meal') found = biometricData.meals?.length > 0;
-            else if (bonus.biometric_type === 'activity') found = biometricData.activities?.length > 0;
-            else if (bonus.biometric_type === 'measurement') found = biometricData.measurements?.length > 0;
-        }
-
-        if (found) {
-            totals.I += (bonus.bonus_i || 0) * mult;
-            totals.S += (bonus.bonus_s || 0) * mult;
-            totals.W += (bonus.bonus_w || 0) * mult;
-            totals.E += (bonus.bonus_e || 0) * mult;
-            totals.C += (bonus.bonus_c || 0) * mult;
-            totals.H += (bonus.bonus_h || 0) * mult;
-            totals.ST += (bonus.bonus_st || 0) * mult;
-            totals.$ += (bonus.bonus_money || 0) * mult;
-        }
+  // Бонусы от финансовых связей
+  for (const link of habitFinanceLinks) {
+    let found = false;
+    if (link.finance_type === 'income_active') {
+      const incomes = financeData.filter(t => {
+        const cat = categoriesMap[t.category_id];
+        return cat && cat.type === 'income' && cat.is_active;
+      });
+      const totalIncome = incomes.reduce((sum, t) => sum + t.amount, 0);
+      if (totalIncome >= link.threshold) found = true;
+    } else if (link.finance_type === 'income_passive') {
+      const incomes = financeData.filter(t => {
+        const cat = categoriesMap[t.category_id];
+        return cat && cat.type === 'income' && !cat.is_active;
+      });
+      const totalIncome = incomes.reduce((sum, t) => sum + t.amount, 0);
+      if (totalIncome >= link.threshold) found = true;
+    } else if (link.finance_type === 'expense') {
+      const expenses = financeData.filter(t => {
+        const cat = categoriesMap[t.category_id];
+        return cat && cat.type === 'expense';
+      });
+      const totalExpense = expenses.reduce((sum, t) => sum + t.amount, 0);
+      if (totalExpense >= link.threshold) found = true;
     }
+    if (found) {
+      totals.I += (link.bonus_i || 0);
+      totals.S += (link.bonus_s || 0);
+      totals.W += (link.bonus_w || 0);
+      totals.E += (link.bonus_e || 0);
+      totals.C += (link.bonus_c || 0);
+      totals.H += (link.bonus_h || 0);
+      totals.ST += (link.bonus_st || 0);
+      totals.$ += (link.bonus_money || 0);
+    }
+  }
 
-    return totals;
+  return totals;
 }
 
 // Модифицируем calculateTotalStats
@@ -777,7 +725,7 @@ function renderTasks() {
         updateReportOutput();
         // Пересчитать характеристики
         const friction = parseInt(elements.frictionIndex.value) || 1;
-        const totals = calculateTotalStatsWithLinks(parsed, friction, currentBiometricData, currentFinanceData);
+        const totals = calculateTotalStats(parsed, friction);
         renderTotalStats(totals);
       };
 
@@ -858,7 +806,7 @@ function renderMeta() {
   elements.percentDone.textContent = pct + "%";
 
   const friction = parseInt(elements.frictionIndex.value) || 1;
-  const totals = calculateTotalStatsWithLinks(parsed, friction, currentBiometricData, currentFinanceData);
+  const totals = calculateTotalStats(parsed, friction);
   renderTotalStats(totals);
 }
 
@@ -868,16 +816,16 @@ function hasBiometricEntry(type, id = null) {
     if (!currentBiometricData) return false;
     let list = [];
     switch (type) {
-        case 'substance': list = currentBiometricData.intakes; break;
+        case 'substance':
+            list = currentBiometricData.intakes.filter(i => i.taken === 1); // только принятые
+            break;
         case 'meal': list = currentBiometricData.meals; break;
         case 'activity': list = currentBiometricData.activities; break;
         case 'measurement': list = currentBiometricData.measurements; break;
-        case 'sleep': list = []; // сон пока не реализован
         default: return false;
     }
     if (!list.length) return false;
-    if (id === null) return true; // любая запись
-    // ищем запись с указанным id (для intake это substance_id, для meal - id, и т.д.)
+    if (id === null) return true;
     if (type === 'substance') {
         return list.some(entry => entry.substance_id === id);
     } else if (type === 'meal') {
@@ -890,12 +838,12 @@ function hasBiometricEntry(type, id = null) {
     return false;
 }
 
+
 // Функция для проверки финансовых транзакций
 function hasFinanceTransaction(type, categoryId = null, threshold = 0) {
-    if (!currentFinanceData) return false;
+    if (!currentFinanceData || !categoriesMap) return false;
     let sum = 0;
     for (const tx of currentFinanceData) {
-        // Определяем тип транзакции по категории
         const cat = categoriesMap[tx.category_id];
         if (!cat) continue;
         const txType = cat.type; // 'income' или 'expense'
@@ -908,129 +856,7 @@ function hasFinanceTransaction(type, categoryId = null, threshold = 0) {
         }
     }
     return sum >= threshold;
-}
-
-// Проверка активности сочетания привычек
-function isCombinationActive(combo) {
-    const habitIds = {};
-    parsed.forEach(item => {
-        if (item.type === "habit") {
-            const habit = habitsCatalog.find(h => h.name === item.name && h.category === item.category);
-            if (habit) habitIds[habit.id] = item.success;
-        }
-    });
-    return habitIds[combo.habit_a] && habitIds[combo.habit_b];
-}
-
-// Проверка активности связи привычка ↔ биометрика
-function isBiometricLinkActive(link) {
-    // Проверяем, выполнена ли привычка
-    let habitSuccess = false;
-    for (const item of parsed) {
-        if (item.type === "habit") {
-            const habit = habitsCatalog.find(h => h.name === item.name && h.category === item.category);
-            if (habit && habit.id === link.habit_id && item.success) {
-                habitSuccess = true;
-                break;
-            }
-        }
-    }
-    if (!habitSuccess) return false;
-
-    // Проверяем наличие биометрической записи
-    switch (link.biometric_type) {
-        case 'substance':
-            if (link.biometric_id) {
-                return currentBiometricData.intakes.some(i => i.substance_id === link.biometric_id && i.taken);
-            } else {
-                return currentBiometricData.intakes.some(i => i.taken);
-            }
-        case 'meal':
-            if (link.biometric_id) {
-                return currentBiometricData.meals.some(m => m.id === link.biometric_id);
-            } else {
-                return currentBiometricData.meals.length > 0;
-            }
-        case 'activity':
-            if (link.biometric_id) {
-                return currentBiometricData.activities.some(a => a.id === link.biometric_id);
-            } else {
-                return currentBiometricData.activities.length > 0;
-            }
-        case 'measurement':
-            if (link.biometric_id) {
-                return currentBiometricData.measurements.some(m => m.id === link.biometric_id);
-            } else {
-                return currentBiometricData.measurements.length > 0;
-            }
-        default:
-            return false;
-    }
-}
-
-// Проверка активности связи привычка ↔ финансы
-function isFinanceLinkActive(link) {
-    // Проверяем привычку
-    let habitSuccess = false;
-    for (const item of parsed) {
-        if (item.type === "habit") {
-            const habit = habitsCatalog.find(h => h.name === item.name && h.category === item.category);
-            if (habit && habit.id === link.habit_id && item.success) {
-                habitSuccess = true;
-                break;
-            }
-        }
-    }
-    if (!habitSuccess) return false;
-
-    // Проверяем финансовые транзакции
-    let sum = 0;
-    for (const tx of currentFinanceData) {
-        const cat = categoriesMap[tx.category_id];
-        if (!cat) continue;
-        const txType = cat.type;
-        if (link.finance_type === 'income_active' && txType === 'income' && cat.is_active) {
-            sum += tx.amount;
-        } else if (link.finance_type === 'income_passive' && txType === 'income' && !cat.is_active) {
-            sum += tx.amount;
-        } else if (link.finance_type === 'expense' && txType === 'expense') {
-            sum += tx.amount;
-        }
-    }
-    return sum >= (link.threshold || 0);
-}
-
-// Проверка активности автоматического бонуса от биометрики
-function isAutoBiometricBonusActive(bonus) {
-    switch (bonus.biometric_type) {
-        case 'substance':
-            if (bonus.biometric_id) {
-                return currentBiometricData.intakes.some(i => i.substance_id === bonus.biometric_id && i.taken);
-            } else {
-                return currentBiometricData.intakes.some(i => i.taken);
-            }
-        case 'meal':
-            if (bonus.biometric_id) {
-                return currentBiometricData.meals.some(m => m.id === bonus.biometric_id);
-            } else {
-                return currentBiometricData.meals.length > 0;
-            }
-        case 'activity':
-            if (bonus.biometric_id) {
-                return currentBiometricData.activities.some(a => a.id === bonus.biometric_id);
-            } else {
-                return currentBiometricData.activities.length > 0;
-            }
-        case 'measurement':
-            if (bonus.biometric_id) {
-                return currentBiometricData.measurements.some(m => m.id === bonus.biometric_id);
-            } else {
-                return currentBiometricData.measurements.length > 0;
-            }
-        default:
-            return false;
-    }
-}
+  }
 
 async function updateReportOutput() {
   const friction = parseInt(elements.frictionIndex.value) || 1;
@@ -1044,14 +870,6 @@ async function updateReportOutput() {
   report += `✅ Выполнено: ${elements.completedCount.textContent}/${elements.totalCount.textContent} (${elements.percentDone.textContent})\n`;
   report += `🔥 Стрики: ${formatStreaksSummary()}\n`;
   const dayNumber = computeDayNumber();
-
-  report += `\n=== ХАРАКТЕРИСТИКИ ===\n`;
-  const stats = ["I", "S", "W", "E", "C", "H", "ST", "$"];
-  stats.forEach(s => {
-    const val = totals[s].toFixed(2);
-    const allTime = allTimeTotals ? allTimeTotals[s].toFixed(2) : "—";
-    report += `${s}: ${val} (всего: ${allTime})\n`;
-  });
 
   const dailySum = calculateStatSum(totals);
   const overallPercent = calculateImprovementPercent(totals, allTimeTotals);
@@ -1090,76 +908,71 @@ async function updateReportOutput() {
   });
 
   // === СВЯЗИ МЕЖДУ МОДУЛЯМИ ===
-  const activeCombos = habitCombinations.filter(isCombinationActive);
-  const activeBioLinks = habitBiometricLinks.filter(isBiometricLinkActive);
-  const activeFinanceLinks = habitFinanceLinks.filter(isFinanceLinkActive);
-  const activeAutoBonuses = autoBiometricBonuses.filter(isAutoBiometricBonusActive);
-
-  if (activeCombos.length > 0 || activeBioLinks.length > 0 || activeFinanceLinks.length > 0 || activeAutoBonuses.length > 0) {
-      report += `\n=== СВЯЗИ МЕЖДУ МОДУЛЯМИ ===\n`;
-      
-      if (activeCombos.length > 0) {
-          report += `Сочетания привычек:\n`;
-          for (const combo of activeCombos) {
-              const habitA = habitsCatalog.find(h => h.id === combo.habit_a);
-              const habitB = habitsCatalog.find(h => h.id === combo.habit_b);
-              const bonusStr = [];
-              ['i','s','w','e','c','h','st','money'].forEach(k => {
-                  if (combo[k] !== 0) bonusStr.push(`${k.toUpperCase()}[${combo[k].toFixed(2)}]`);
-              });
-              report += `  ${combo.name || 'Без названия'}: ${habitA?.name || '?'} + ${habitB?.name || '?'} → ${bonusStr.join(' ')}\n`;
-          }
+  if (habitCombinations.length > 0 || habitBiometricLinks.length > 0 || habitFinanceLinks.length > 0 || autoBiometricBonuses.length > 0) {
+    report += `\n=== СВЯЗИ МЕЖДУ МОДУЛЯМИ ===\n`;
+    
+    if (habitCombinations.length > 0) {
+      report += `Сочетания привычек:\n`;
+      for (const combo of habitCombinations) {
+        const habitA = habitsCatalog.find(h => h.id === combo.habit_a);
+        const habitB = habitsCatalog.find(h => h.id === combo.habit_b);
+        const bonusStr = [];
+        ['i','s','w','e','c','h','st','money'].forEach(k => {
+          if (combo[k] !== 0) bonusStr.push(`${k.toUpperCase()}[${combo[k].toFixed(2)}]`);
+        });
+        report += `  ${combo.name || 'Без названия'}: ${habitA?.name || '?'} + ${habitB?.name || '?'} → ${bonusStr.join(' ')}\n`;
       }
-      
-      if (activeBioLinks.length > 0) {
-          report += `Связи привычка ↔ биометрика:\n`;
-          for (const link of activeBioLinks) {
-              const habit = habitsCatalog.find(h => h.id === link.habit_id);
-              let bioName = link.biometric_type;
-              if (link.biometric_type === 'substance' && link.biometric_id) {
-                  const sub = substancesCatalog.find(s => s.id === link.biometric_id);
-                  if (sub) bioName = sub.name;
-                  else bioName = `Вещество #${link.biometric_id}`;
-              } else if (link.biometric_type === 'meal' && link.biometric_id) {
-                  const meal = mealsCatalog.find(m => m.id === link.biometric_id);
-                  bioName = meal ? `${meal.date} ${meal.meal_type}` : `Приём #${link.biometric_id}`;
-              } else if (link.biometric_type === 'activity' && link.biometric_id) {
-                  const act = activitiesCatalog.find(a => a.id === link.biometric_id);
-                  bioName = act ? `${act.date} ${act.activity_type}` : `Активность #${link.biometric_id}`;
-              } else if (link.biometric_type === 'measurement' && link.biometric_id) {
-                  const meas = measurementsCatalog.find(m => m.id === link.biometric_id);
-                  bioName = meas ? meas.date : `Измерение #${link.biometric_id}`;
-              }
-              const bonusStr = [];
-              ['i','s','w','e','c','h','st','money'].forEach(k => {
-                  if (link[`bonus_${k}`] !== 0) bonusStr.push(`${k.toUpperCase()}[${link[`bonus_${k}`].toFixed(2)}]`);
-              });
-              report += `  ${habit?.name || '?'} ↔ ${bioName} → ${bonusStr.join(' ')}\n`;
-          }
+    }
+    
+    if (habitBiometricLinks.length > 0) {
+      report += `Связи привычка ↔ биометрика:\n`;
+      for (const link of habitBiometricLinks) {
+        const habit = habitsCatalog.find(h => h.id === link.habit_id);
+        let bioName = link.biometric_type;
+        if (link.biometric_type === 'substance' && link.biometric_id) {
+          const sub = substancesCatalog.find(s => s.id === link.biometric_id);
+          if (sub) bioName = sub.name;
+          else bioName = `Вещество #${link.biometric_id}`;
+        } else if (link.biometric_type === 'meal' && link.biometric_id) {
+          const meal = mealsCatalog.find(m => m.id === link.biometric_id);
+          bioName = meal ? `${meal.date} ${meal.meal_type}` : `Приём #${link.biometric_id}`;
+        } else if (link.biometric_type === 'activity' && link.biometric_id) {
+          const act = activitiesCatalog.find(a => a.id === link.biometric_id);
+          bioName = act ? `${act.date} ${act.activity_type}` : `Активность #${link.biometric_id}`;
+        } else if (link.biometric_type === 'measurement' && link.biometric_id) {
+          const meas = measurementsCatalog.find(m => m.id === link.biometric_id);
+          bioName = meas ? meas.date : `Измерение #${link.biometric_id}`;
+        }
+        const bonusStr = [];
+        ['i','s','w','e','c','h','st','money'].forEach(k => {
+          if (link[`bonus_${k}`] !== 0) bonusStr.push(`${k.toUpperCase()}[${link[`bonus_${k}`].toFixed(2)}]`);
+        });
+        report += `  ${habit?.name || '?'} ↔ ${bioName} → ${bonusStr.join(' ')}\n`;
       }
-      
-      if (activeFinanceLinks.length > 0) {
-          report += `Связи привычка ↔ финансы:\n`;
-          for (const link of activeFinanceLinks) {
-              const habit = habitsCatalog.find(h => h.id === link.habit_id);
-              const bonusStr = [];
-              ['i','s','w','e','c','h','st','money'].forEach(k => {
-                  if (link[`bonus_${k}`] !== 0) bonusStr.push(`${k.toUpperCase()}[${link[`bonus_${k}`].toFixed(2)}]`);
-              });
-              report += `  ${habit?.name || '?'} ↔ ${link.finance_type}${link.category_id ? ` (категория ${link.category_id})` : ''}, порог ${link.threshold} → ${bonusStr.join(' ')}\n`;
-          }
+    }
+    
+    if (habitFinanceLinks.length > 0) {
+      report += `Связи привычка ↔ финансы:\n`;
+      for (const link of habitFinanceLinks) {
+        const habit = habitsCatalog.find(h => h.id === link.habit_id);
+        const bonusStr = [];
+        ['i','s','w','e','c','h','st','money'].forEach(k => {
+          if (link[`bonus_${k}`] !== 0) bonusStr.push(`${k.toUpperCase()}[${link[`bonus_${k}`].toFixed(2)}]`);
+        });
+        report += `  ${habit?.name || '?'} ↔ ${link.finance_type}${link.category_id ? ` (категория ${link.category_id})` : ''}, порог ${link.threshold} → ${bonusStr.join(' ')}\n`;
       }
-      
-      if (activeAutoBonuses.length > 0) {
-          report += `Автоматические бонусы от биометрики:\n`;
-          for (const bonus of activeAutoBonuses) {
-              const bonusStr = [];
-              ['i','s','w','e','c','h','st','money'].forEach(k => {
-                  if (bonus[`bonus_${k}`] !== 0) bonusStr.push(`${k.toUpperCase()}[${bonus[`bonus_${k}`].toFixed(2)}]`);
-              });
-              report += `  ${bonus.biometric_type}${bonus.biometric_id ? ` #${bonus.biometric_id}` : ''}: ${bonus.description || 'без описания'} → ${bonusStr.join(' ')}\n`;
-          }
+    }
+    
+    if (autoBiometricBonuses.length > 0) {
+      report += `Автоматические бонусы от биометрики:\n`;
+      for (const bonus of autoBiometricBonuses) {
+        const bonusStr = [];
+        ['i','s','w','e','c','h','st','money'].forEach(k => {
+          if (bonus[`bonus_${k}`] !== 0) bonusStr.push(`${k.toUpperCase()}[${bonus[`bonus_${k}`].toFixed(2)}]`);
+        });
+        report += `  ${bonus.biometric_type}${bonus.biometric_id ? ` #${bonus.biometric_id}` : ''}: ${bonus.description || 'без описания'} → ${bonusStr.join(' ')}\n`;
       }
+    }
   }
 
   // === ФИНАНСЫ ===
@@ -1247,6 +1060,14 @@ async function updateReportOutput() {
           if (m.notes) report += `  Примечание: ${m.notes}\n`;
       }
   }
+
+  report += `\n=== ХАРАКТЕРИСТИКИ ===\n`;
+  const stats = ["I", "S", "W", "E", "C", "H", "ST", "$"];
+  stats.forEach(s => {
+    const val = totals[s].toFixed(2);
+    const allTime = allTimeTotals ? allTimeTotals[s].toFixed(2) : "—";
+    report += `${s}: ${val} (всего: ${allTime})\n`;
+  });
 
 
   elements.reportOutput.textContent = report;
@@ -1402,28 +1223,40 @@ function loadFromLocalStorage() {
   parseTextInput();
 }
 
+// Загрузка финансовых транзакций для даты
 async function loadFinanceData(date) {
     try {
         const data = await fetchAPI(`/api/finance_transactions/list?date=${date}`);
-        return data.data;
+        currentFinanceData = data.data;
     } catch (e) {
         console.warn('Failed to load finance data', e);
-        return [];
+        currentFinanceData = [];
+    }
+}
+
+// Загрузка категорий финансов
+async function loadFinanceCategories() {
+    try {
+        const data = await fetchAPI('/api/finance_categories/list');
+        categoriesMap = {};
+        data.data.forEach(cat => { categoriesMap[cat.id] = cat; });
+    } catch (e) {
+        console.warn('Failed to load finance categories', e);
     }
 }
 
 async function loadBiometricData(date) {
-    const result = {};
     try {
+        const result = {};
         result.intakes = (await fetchAPI(`/api/biometric_intake_log/list?date=${date}`)).data;
         result.meals = (await fetchAPI(`/api/biometric_meals/list?date=${date}`)).data;
         result.measurements = (await fetchAPI(`/api/biometric_measurements/list?date=${date}`)).data;
         result.activities = (await fetchAPI(`/api/biometric_physical_activity/list?date=${date}`)).data;
         result.mental = (await fetchAPI(`/api/biometric_mental_daily/list?date=${date}`)).data;
-        return result;
+        currentBiometricData = result;
     } catch (e) {
         console.warn('Failed to load biometric data', e);
-        return { intakes: [], meals: [], measurements: [], activities: [], mental: [] };
+        currentBiometricData = { intakes: [], meals: [], activities: [], measurements: [], mental: [] };
     }
 }
 
@@ -1440,7 +1273,7 @@ async function loadSubstancesCatalog() {
 async function saveToDatabase() {
   try {
     const friction = parseInt(elements.frictionIndex.value) || 1;
-    const totals = calculateTotalStatsWithLinks(parsed, friction, currentBiometricData, currentFinanceData);
+    const totals = calculateTotalStats(parsed, friction);
     console.log("🔵 saveToDatabase: STEP 1 - totals calculated:", totals);
 
     // КРИТИЧНОЕ: убеждаемся что дата установлена!
@@ -1772,6 +1605,13 @@ async function saveToDatabase() {
     await loadBiometricCatalogs();      // +++ добавить
     await loadFinanceCategories();       // +++ добавить
     
+    // Загрузить биометрические и финансовые данные для текущей даты отчёта
+    const reportDate = elements.reportDateEl.value || toISODate(new Date());
+    await Promise.all([
+        loadBiometricData(reportDate),
+        loadFinanceData(reportDate)
+    ]);
+
     const today = toISODate(new Date());
     if (!elements.reportDateEl.value) {
       elements.reportDateEl.value = today;
